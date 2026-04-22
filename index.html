@@ -153,6 +153,10 @@
             background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
         }
         
+        .btn-warning {
+            background: linear-gradient(135deg, #f6d365 0%, #fda085 100%);
+        }
+        
         .result-section {
             margin-top: 30px;
             padding: 20px;
@@ -214,6 +218,12 @@
             border: 1px solid #bee5eb;
         }
         
+        .status.warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+        }
+        
         .stats {
             display: flex;
             justify-content: space-around;
@@ -249,7 +259,7 @@
             color: #333;
         }
         
-        textarea, input {
+        textarea {
             width: 100%;
             padding: 10px;
             border: 1px solid #ddd;
@@ -259,23 +269,15 @@
             resize: vertical;
         }
         
-        .config-section {
-            margin-top: 20px;
-            padding: 15px;
-            background: #fff3cd;
-            border-radius: 10px;
-            border: 1px solid #ffc107;
-        }
-        
-        .config-section label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: bold;
+        .duplicate-badge {
+            display: inline-block;
+            background: #ffc107;
             color: #856404;
-        }
-        
-        .config-section input {
-            background: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
         }
         
         @media (max-width: 768px) {
@@ -297,6 +299,23 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+        
+        .recent-scans {
+            margin-top: 20px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .scan-history-item {
+            padding: 8px;
+            border-bottom: 1px solid #e0e0e0;
+            font-size: 12px;
+        }
+        
+        .scan-history-item .timestamp {
+            color: #999;
+            font-size: 10px;
+        }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 </head>
@@ -308,16 +327,6 @@
         </div>
         
         <div class="main-card">
-            <!-- Configuration Section -->
-            <div class="config-section">
-                <label>🔗 Google Apps Script Web App URL:</label>
-                <input type="text" id="webAppUrl" placeholder="https://script.google.com/macros/s/.../exec" 
-                       value="YOUR_APPS_SCRIPT_URL_HERE">
-                <small style="color: #856404; display: block; margin-top: 5px;">
-                    ⚠️ Replace with your deployed Google Apps Script Web App URL
-                </small>
-            </div>
-            
             <div class="scanner-section">
                 <div class="video-container">
                     <video id="video" playsinline></video>
@@ -331,21 +340,26 @@
                 <div class="controls">
                     <button id="startBtn" class="btn-success" onclick="startScanner()">▶ Start Scanner</button>
                     <button id="stopBtn" class="btn-danger" onclick="stopScanner()" disabled>⏹ Stop Scanner</button>
+                    <button onclick="clearHistory()" class="btn-warning">🗑 Clear History</button>
                 </div>
             </div>
             
             <div class="result-section">
-                <h3>📊 Scanned Data</h3>
+                <h3>📊 Last Scanned Data</h3>
                 <div id="result" class="result-data">
                     <p style="color: #999;">No data scanned yet...</p>
                 </div>
                 <div id="status"></div>
             </div>
             
-            <div class="stats" id="stats" style="display: none;">
+            <div class="stats">
                 <div class="stat-card">
                     <div class="stat-number" id="recordCount">0</div>
-                    <div class="stat-label">Total Records</div>
+                    <div class="stat-label">Total Records in Sheet</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="uniqueCount">0</div>
+                    <div class="stat-label">Unique Scans Today</div>
                 </div>
             </div>
             
@@ -354,26 +368,133 @@
                 <textarea id="manualData" rows="3" placeholder="Enter QR data manually (Format: Name|Vendor|Designation or JSON: {&quot;name&quot;:&quot;John&quot;,&quot;vendor&quot;:&quot;ABC Corp&quot;,&quot;designation&quot;:&quot;Manager&quot;})"></textarea>
                 <button onclick="saveManualData()" style="margin-top: 10px;">💾 Save Manually</button>
                 <button onclick="testConnection()" style="margin-top: 10px; background: #6c757d;">🔌 Test Connection</button>
-                <button onclick="loadRecordCount()" style="margin-top: 10px; background: #28a745;">📊 Load Stats</button>
+                <button onclick="loadRecordCount()" style="margin-top: 10px; background: #28a745;">📊 Refresh Stats</button>
+            </div>
+            
+            <div class="recent-scans" id="recentScans" style="display: none;">
+                <h3>📜 Recent Scan History</h3>
+                <div id="scanHistory"></div>
             </div>
         </div>
     </div>
     
     <script>
+        // ==================== CONFIGURATION ====================
+        // SET YOUR GOOGLE APPS SCRIPT WEB APP URL HERE:
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxHea5T5OR4LJR9POeDKjcb2Mo0JbCHEf20QDdHQ6uuybcIjWsS6jxvZG_kaRbTIikc5Q/exec';
+        // Replace the above URL with your actual deployed Apps Script URL
+        // ======================================================
+        
         let video = document.getElementById('video');
         let canvas = document.getElementById('canvas');
         let canvasContext = canvas.getContext('2d');
         let scanning = false;
         let animationId = null;
         
-        // Get Web App URL
-        function getWebAppUrl() {
-            let url = document.getElementById('webAppUrl').value.trim();
-            if (!url || url === 'YOUR_APPS_SCRIPT_URL_HERE') {
-                showStatus('Please configure your Google Apps Script Web App URL first!', 'error');
-                return null;
+        // Duplicate detection variables
+        let scannedHashes = new Set();
+        let recentScans = [];
+        let lastScanTime = 0;
+        const DUPLICATE_WINDOW_MS = 5000; // 5 seconds window for duplicate detection
+        const SCAN_COOLDOWN_MS = 2000; // 2 seconds cooldown between scans
+        
+        // Load existing history from localStorage
+        function loadHistory() {
+            const saved = localStorage.getItem('qrScanHistory');
+            if (saved) {
+                try {
+                    recentScans = JSON.parse(saved);
+                    updateHistoryDisplay();
+                } catch(e) {}
             }
-            return url;
+        }
+        
+        // Save history to localStorage
+        function saveHistory() {
+            localStorage.setItem('qrScanHistory', JSON.stringify(recentScans.slice(0, 50))); // Keep last 50
+        }
+        
+        // Clear history
+        function clearHistory() {
+            recentScans = [];
+            scannedHashes.clear();
+            saveHistory();
+            updateHistoryDisplay();
+            showStatus('Scan history cleared!', 'info');
+            document.getElementById('recentScans').style.display = 'none';
+        }
+        
+        // Update history display
+        function updateHistoryDisplay() {
+            const historyDiv = document.getElementById('scanHistory');
+            if (recentScans.length === 0) {
+                document.getElementById('recentScans').style.display = 'none';
+                return;
+            }
+            
+            document.getElementById('recentScans').style.display = 'block';
+            historyDiv.innerHTML = recentScans.map(scan => `
+                <div class="scan-history-item">
+                    <strong>${escapeHtml(scan.name || scan.raw.substring(0, 30))}</strong>
+                    <div class="timestamp">${scan.timestamp} ${scan.duplicate ? '⚠️ Duplicate' : '✅ Saved'}</div>
+                </div>
+            `).join('');
+            
+            // Update unique count for today
+            const today = new Date().toDateString();
+            const todayUnique = recentScans.filter(s => 
+                s.timestamp.includes(today) && !s.duplicate
+            ).length;
+            document.getElementById('uniqueCount').textContent = todayUnique;
+        }
+        
+        // Check if QR code is duplicate
+        function isDuplicate(qrData) {
+            const now = Date.now();
+            const hash = simpleHash(qrData);
+            
+            // Check if same hash was scanned within duplicate window
+            if (scannedHashes.has(hash)) {
+                return true;
+            }
+            
+            // Add to scanned hashes with expiry
+            scannedHashes.add(hash);
+            setTimeout(() => {
+                scannedHashes.delete(hash);
+            }, DUPLICATE_WINDOW_MS);
+            
+            return false;
+        }
+        
+        // Simple hash function for QR data
+        function simpleHash(str) {
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                const char = str.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash;
+            }
+            return hash.toString();
+        }
+        
+        // Add to scan history
+        function addToHistory(qrData, parsed, wasDuplicate, saved = false) {
+            const now = new Date();
+            recentScans.unshift({
+                raw: qrData,
+                name: parsed.name,
+                vendor: parsed.vendor,
+                designation: parsed.designation,
+                timestamp: now.toLocaleString(),
+                duplicate: wasDuplicate,
+                saved: saved
+            });
+            
+            // Keep only last 50 scans
+            if (recentScans.length > 50) recentScans.pop();
+            saveHistory();
+            updateHistoryDisplay();
         }
         
         // Start camera and scanner
@@ -417,6 +538,8 @@
         }
         
         // Scan QR code from video frame
+        let canScan = true;
+        
         function scan() {
             if (!scanning) return;
             
@@ -430,11 +553,33 @@
                     inversionAttempts: "dontInvert",
                 });
                 
-                if (code) {
-                    const qrData = code.data;
-                    displayResult(qrData);
-                    saveToSheet(qrData);
-                    stopScanner();
+                if (code && canScan) {
+                    const now = Date.now();
+                    if (now - lastScanTime >= SCAN_COOLDOWN_MS) {
+                        lastScanTime = now;
+                        canScan = false;
+                        
+                        const qrData = code.data;
+                        const parsed = parseQRData(qrData);
+                        const duplicate = isDuplicate(qrData);
+                        
+                        displayResult(qrData, duplicate);
+                        
+                        if (duplicate) {
+                            showStatus('⚠️ Duplicate QR code detected! Not saving again.', 'warning');
+                            addToHistory(qrData, parsed, true, false);
+                            // Resume scanning after shorter cooldown for duplicates
+                            setTimeout(() => { canScan = true; }, 1000);
+                        } else {
+                            addToHistory(qrData, parsed, false, true);
+                            saveToSheet(qrData);
+                            // Longer cooldown after successful save
+                            setTimeout(() => { canScan = true; }, SCAN_COOLDOWN_MS);
+                        }
+                    }
+                } else if (!code) {
+                    // Reset canScan if no code detected for a while
+                    setTimeout(() => { canScan = true; }, 500);
                 }
             }
             
@@ -442,13 +587,13 @@
         }
         
         // Display scanned result
-        function displayResult(qrData) {
+        function displayResult(qrData, isDuplicate = false) {
             let parsed = parseQRData(qrData);
             const resultDiv = document.getElementById('result');
             resultDiv.innerHTML = `
                 <p><strong>📝 Raw Data:</strong></p>
                 <p style="background:#f0f0f0; padding:10px; border-radius:5px; font-family:monospace;">${escapeHtml(qrData)}</p>
-                <p><strong>👤 Name:</strong> ${escapeHtml(parsed.name)}</p>
+                <p><strong>👤 Name:</strong> ${escapeHtml(parsed.name)} ${isDuplicate ? '<span class="duplicate-badge">DUPLICATE</span>' : ''}</p>
                 <p><strong>🏢 Vendor:</strong> ${escapeHtml(parsed.vendor)}</p>
                 <p><strong>💼 Designation:</strong> ${escapeHtml(parsed.designation)}</p>
             `;
@@ -481,13 +626,15 @@
         
         // Save data to Google Sheet via POST request
         async function saveToSheet(qrData) {
-            const url = getWebAppUrl();
-            if (!url) return;
+            if (!WEB_APP_URL || WEB_APP_URL === 'https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec') {
+                showStatus('⚠️ Please configure the WEB_APP_URL in the script!', 'error');
+                return;
+            }
             
             showStatus('Saving data to Google Sheet...', 'info');
             
             try {
-                const response = await fetch(url, {
+                const response = await fetch(WEB_APP_URL, {
                     method: 'POST',
                     mode: 'no-cors',
                     headers: {
@@ -496,8 +643,7 @@
                     body: JSON.stringify({ qrData: qrData })
                 });
                 
-                // Note: With no-cors, we can't read the response
-                showStatus('✅ Data sent successfully!', 'success');
+                showStatus('✅ Data saved successfully!', 'success');
                 loadRecordCount();
                 
             } catch (error) {
@@ -506,30 +652,7 @@
             }
         }
         
-        // Alternative method using JSONP-style GET
-        async function saveToSheetAlt(qrData) {
-            const url = getWebAppUrl();
-            if (!url) return;
-            
-            showStatus('Saving data to Google Sheet...', 'info');
-            
-            try {
-                const response = await fetch(`${url}?action=save&data=${encodeURIComponent(qrData)}`);
-                const result = await response.json();
-                
-                if (result.success) {
-                    showStatus(`✅ ${result.message} (Row ${result.row})`, 'success');
-                    loadRecordCount();
-                } else {
-                    showStatus(`❌ ${result.message}`, 'error');
-                }
-            } catch (error) {
-                console.error('Save error:', error);
-                showStatus(`❌ Error: ${error.message}`, 'error');
-            }
-        }
-        
-        // Manual data entry
+        // Manual data entry with duplicate check
         function saveManualData() {
             const manualData = document.getElementById('manualData').value.trim();
             if (!manualData) {
@@ -537,20 +660,33 @@
                 return;
             }
             
-            displayResult(manualData);
-            saveToSheet(manualData);
+            const parsed = parseQRData(manualData);
+            const duplicate = isDuplicate(manualData);
+            
+            displayResult(manualData, duplicate);
+            
+            if (duplicate) {
+                showStatus('⚠️ Duplicate QR code detected! Not saving again.', 'warning');
+                addToHistory(manualData, parsed, true, false);
+            } else {
+                addToHistory(manualData, parsed, false, true);
+                saveToSheet(manualData);
+            }
+            
             document.getElementById('manualData').value = '';
         }
         
         // Test connection
         async function testConnection() {
-            const url = getWebAppUrl();
-            if (!url) return;
+            if (!WEB_APP_URL || WEB_APP_URL === 'https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec') {
+                showStatus('⚠️ Please configure the WEB_APP_URL in the script!', 'error');
+                return;
+            }
             
             showStatus('Testing connection to Google Sheet...', 'info');
             
             try {
-                const response = await fetch(`${url}?action=test`);
+                const response = await fetch(`${WEB_APP_URL}?action=test`);
                 const result = await response.json();
                 
                 if (result.success) {
@@ -566,13 +702,13 @@
         
         // Load total record count
         async function loadRecordCount() {
-            const url = getWebAppUrl();
-            if (!url) return;
+            if (!WEB_APP_URL || WEB_APP_URL === 'https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec') {
+                return;
+            }
             
             try {
-                const response = await fetch(`${url}?action=count`);
+                const response = await fetch(`${WEB_APP_URL}?action=count`);
                 const count = await response.json();
-                document.getElementById('stats').style.display = 'flex';
                 document.getElementById('recordCount').textContent = count;
             } catch (error) {
                 console.error('Failed to load count:', error);
@@ -600,27 +736,16 @@
             return div.innerHTML;
         }
         
-        // Save URL to localStorage
-        function saveUrl() {
-            const url = document.getElementById('webAppUrl').value;
-            localStorage.setItem('qrScannerWebAppUrl', url);
-        }
-        
-        // Load URL from localStorage
-        function loadUrl() {
-            const savedUrl = localStorage.getItem('qrScannerWebAppUrl');
-            if (savedUrl) {
-                document.getElementById('webAppUrl').value = savedUrl;
-            }
-        }
-        
-        // Auto-save URL when changed
-        document.getElementById('webAppUrl').addEventListener('change', saveUrl);
-        
         // Initialize
         window.addEventListener('load', function() {
-            loadUrl();
-            showStatus('Configure the Web App URL and click "Start Scanner" to begin.', 'info');
+            loadHistory();
+            loadRecordCount();
+            
+            if (!WEB_APP_URL || WEB_APP_URL === 'https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec') {
+                showStatus('⚠️ Please configure the WEB_APP_URL in the HTML script (line ~280)', 'warning');
+            } else {
+                showStatus('Ready! Click "Start Scanner" to begin scanning QR codes.', 'info');
+            }
         });
         
         // Clean up
