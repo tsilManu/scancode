@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>QR Code Scanner - Store Data to Google Sheets</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        
+        .main-card {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            margin-bottom: 30px;
+        }
+        
+        .scanner-section {
+            text-align: center;
+        }
+        
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 640px;
+            margin: 0 auto 20px;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+            background: #000;
+        }
+        
+        #video {
+            width: 100%;
+            height: auto;
+            background: #000;
+            display: block;
+        }
+        
+        #canvas {
+            display: none;
+        }
+        
+        .scan-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        
+        .scan-frame {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            height: 80%;
+            border: 3px solid #00ff00;
+            border-radius: 10px;
+            box-shadow: 0 0 0 9999px rgba(0,0,0,0.5);
+            animation: pulse 2s infinite;
+        }
+        
+        .scan-line {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #00ff00, transparent);
+            animation: scan 2s linear infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { border-color: #00ff00; box-shadow: 0 0 0 9999px rgba(0,0,0,0.5); }
+            50% { border-color: #ffff00; box-shadow: 0 0 0 9999px rgba(0,0,0,0.3); }
+        }
+        
+        @keyframes scan {
+            0% { top: 0; }
+            100% { top: 100%; }
+        }
+        
+        .controls {
+            margin-top: 20px;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            font-size: 16px;
+            border-radius: 25px;
+            cursor: pointer;
+            margin: 5px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+        
+        .result-section {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 15px;
+        }
+        
+        .result-data {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 10px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .result-data p {
+            margin: 8px 0;
+            word-break: break-all;
+        }
+        
+        .result-data strong {
+            color: #667eea;
+        }
+        
+        .status {
+            padding: 10px;
+            border-radius: 8px;
+            margin-top: 15px;
+            text-align: center;
+            animation: slideIn 0.3s ease;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateY(-20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+        
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 15px;
+        }
+        
+        .stat-card {
+            text-align: center;
+        }
+        
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .manual-input {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 2px solid #e0e0e0;
+        }
+        
+        .manual-input h3 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+        
+        textarea, input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: monospace;
+            resize: vertical;
+        }
+        
+        .config-section {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff3cd;
+            border-radius: 10px;
+            border: 1px solid #ffc107;
+        }
+        
+        .config-section label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #856404;
+        }
+        
+        .config-section input {
+            background: white;
+        }
+        
+        @media (max-width: 768px) {
+            .header h1 { font-size: 1.8em; }
+            .main-card { padding: 20px; }
+            .scan-frame { width: 90%; height: 70%; }
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📱 QR Code Scanner</h1>
+            <p>Scan QR codes to automatically store data in Google Sheets</p>
+        </div>
+        
+        <div class="main-card">
+            <!-- Configuration Section -->
+            <div class="config-section">
+                <label>🔗 Google Apps Script Web App URL:</label>
+                <input type="text" id="webAppUrl" placeholder="https://script.google.com/macros/s/.../exec" 
+                       value="YOUR_APPS_SCRIPT_URL_HERE">
+                <small style="color: #856404; display: block; margin-top: 5px;">
+                    ⚠️ Replace with your deployed Google Apps Script Web App URL
+                </small>
+            </div>
+            
+            <div class="scanner-section">
+                <div class="video-container">
+                    <video id="video" playsinline></video>
+                    <canvas id="canvas"></canvas>
+                    <div class="scan-overlay">
+                        <div class="scan-frame"></div>
+                        <div class="scan-line"></div>
+                    </div>
+                </div>
+                
+                <div class="controls">
+                    <button id="startBtn" class="btn-success" onclick="startScanner()">▶ Start Scanner</button>
+                    <button id="stopBtn" class="btn-danger" onclick="stopScanner()" disabled>⏹ Stop Scanner</button>
+                </div>
+            </div>
+            
+            <div class="result-section">
+                <h3>📊 Scanned Data</h3>
+                <div id="result" class="result-data">
+                    <p style="color: #999;">No data scanned yet...</p>
+                </div>
+                <div id="status"></div>
+            </div>
+            
+            <div class="stats" id="stats" style="display: none;">
+                <div class="stat-card">
+                    <div class="stat-number" id="recordCount">0</div>
+                    <div class="stat-label">Total Records</div>
+                </div>
+            </div>
+            
+            <div class="manual-input">
+                <h3>✏️ Manual QR Data Entry</h3>
+                <textarea id="manualData" rows="3" placeholder="Enter QR data manually (Format: Name|Vendor|Designation or JSON: {&quot;name&quot;:&quot;John&quot;,&quot;vendor&quot;:&quot;ABC Corp&quot;,&quot;designation&quot;:&quot;Manager&quot;})"></textarea>
+                <button onclick="saveManualData()" style="margin-top: 10px;">💾 Save Manually</button>
+                <button onclick="testConnection()" style="margin-top: 10px; background: #6c757d;">🔌 Test Connection</button>
+                <button onclick="loadRecordCount()" style="margin-top: 10px; background: #28a745;">📊 Load Stats</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let video = document.getElementById('video');
+        let canvas = document.getElementById('canvas');
+        let canvasContext = canvas.getContext('2d');
+        let scanning = false;
+        let animationId = null;
+        
+        // Get Web App URL
+        function getWebAppUrl() {
+            let url = document.getElementById('webAppUrl').value.trim();
+            if (!url || url === 'YOUR_APPS_SCRIPT_URL_HERE') {
+                showStatus('Please configure your Google Apps Script Web App URL first!', 'error');
+                return null;
+            }
+            return url;
+        }
+        
+        // Start camera and scanner
+        async function startScanner() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
+                video.srcObject = stream;
+                video.setAttribute('playsinline', true);
+                await video.play();
+                
+                scanning = true;
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                
+                requestAnimationFrame(scan);
+                
+                showStatus('Scanner started. Position QR code in the frame.', 'info');
+            } catch (error) {
+                console.error('Camera error:', error);
+                showStatus('Unable to access camera. Please ensure camera permissions are granted.', 'error');
+            }
+        }
+        
+        // Stop scanner
+        function stopScanner() {
+            if (video.srcObject) {
+                const tracks = video.srcObject.getTracks();
+                tracks.forEach(track => track.stop());
+                video.srcObject = null;
+            }
+            scanning = false;
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            showStatus('Scanner stopped.', 'info');
+        }
+        
+        // Scan QR code from video frame
+        function scan() {
+            if (!scanning) return;
+            
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                canvasContext.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                const imageData = canvasContext.getImageData(0, 0, canvas.width, canvas.height);
+                const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                    inversionAttempts: "dontInvert",
+                });
+                
+                if (code) {
+                    const qrData = code.data;
+                    displayResult(qrData);
+                    saveToSheet(qrData);
+                    stopScanner();
+                }
+            }
+            
+            animationId = requestAnimationFrame(scan);
+        }
+        
+        // Display scanned result
+        function displayResult(qrData) {
+            let parsed = parseQRData(qrData);
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = `
+                <p><strong>📝 Raw Data:</strong></p>
+                <p style="background:#f0f0f0; padding:10px; border-radius:5px; font-family:monospace;">${escapeHtml(qrData)}</p>
+                <p><strong>👤 Name:</strong> ${escapeHtml(parsed.name)}</p>
+                <p><strong>🏢 Vendor:</strong> ${escapeHtml(parsed.vendor)}</p>
+                <p><strong>💼 Designation:</strong> ${escapeHtml(parsed.designation)}</p>
+            `;
+        }
+        
+        // Parse QR data
+        function parseQRData(qrData) {
+            let name = '', vendor = '', designation = '';
+            
+            try {
+                const parsed = JSON.parse(qrData);
+                name = parsed.name || parsed.Name || '';
+                vendor = parsed.vendor || parsed.Vendor || '';
+                designation = parsed.designation || parsed.Designation || '';
+            } catch (e) {
+                const parts = qrData.split('|');
+                if (parts.length >= 3) {
+                    name = parts[0].trim();
+                    vendor = parts[1].trim();
+                    designation = parts[2].trim();
+                } else {
+                    name = qrData;
+                    vendor = 'N/A';
+                    designation = 'N/A';
+                }
+            }
+            
+            return { name, vendor, designation };
+        }
+        
+        // Save data to Google Sheet via POST request
+        async function saveToSheet(qrData) {
+            const url = getWebAppUrl();
+            if (!url) return;
+            
+            showStatus('Saving data to Google Sheet...', 'info');
+            
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ qrData: qrData })
+                });
+                
+                // Note: With no-cors, we can't read the response
+                showStatus('✅ Data sent successfully!', 'success');
+                loadRecordCount();
+                
+            } catch (error) {
+                console.error('Save error:', error);
+                showStatus(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+        
+        // Alternative method using JSONP-style GET
+        async function saveToSheetAlt(qrData) {
+            const url = getWebAppUrl();
+            if (!url) return;
+            
+            showStatus('Saving data to Google Sheet...', 'info');
+            
+            try {
+                const response = await fetch(`${url}?action=save&data=${encodeURIComponent(qrData)}`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    showStatus(`✅ ${result.message} (Row ${result.row})`, 'success');
+                    loadRecordCount();
+                } else {
+                    showStatus(`❌ ${result.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('Save error:', error);
+                showStatus(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+        
+        // Manual data entry
+        function saveManualData() {
+            const manualData = document.getElementById('manualData').value.trim();
+            if (!manualData) {
+                showStatus('Please enter QR data.', 'error');
+                return;
+            }
+            
+            displayResult(manualData);
+            saveToSheet(manualData);
+            document.getElementById('manualData').value = '';
+        }
+        
+        // Test connection
+        async function testConnection() {
+            const url = getWebAppUrl();
+            if (!url) return;
+            
+            showStatus('Testing connection to Google Sheet...', 'info');
+            
+            try {
+                const response = await fetch(`${url}?action=test`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    showStatus(`✅ ${result.message} (${result.rowCount} records)`, 'success');
+                    loadRecordCount();
+                } else {
+                    showStatus(`❌ ${result.message}`, 'error');
+                }
+            } catch (error) {
+                showStatus(`❌ Connection test failed: ${error.message}`, 'error');
+            }
+        }
+        
+        // Load total record count
+        async function loadRecordCount() {
+            const url = getWebAppUrl();
+            if (!url) return;
+            
+            try {
+                const response = await fetch(`${url}?action=count`);
+                const count = await response.json();
+                document.getElementById('stats').style.display = 'flex';
+                document.getElementById('recordCount').textContent = count;
+            } catch (error) {
+                console.error('Failed to load count:', error);
+            }
+        }
+        
+        // Show status message
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = `<div class="status ${type}">${message}</div>`;
+            
+            if (type !== 'error') {
+                setTimeout(() => {
+                    if (statusDiv.innerHTML.includes(message)) {
+                        statusDiv.innerHTML = '';
+                    }
+                }, 5000);
+            }
+        }
+        
+        // Helper function to escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Save URL to localStorage
+        function saveUrl() {
+            const url = document.getElementById('webAppUrl').value;
+            localStorage.setItem('qrScannerWebAppUrl', url);
+        }
+        
+        // Load URL from localStorage
+        function loadUrl() {
+            const savedUrl = localStorage.getItem('qrScannerWebAppUrl');
+            if (savedUrl) {
+                document.getElementById('webAppUrl').value = savedUrl;
+            }
+        }
+        
+        // Auto-save URL when changed
+        document.getElementById('webAppUrl').addEventListener('change', saveUrl);
+        
+        // Initialize
+        window.addEventListener('load', function() {
+            loadUrl();
+            showStatus('Configure the Web App URL and click "Start Scanner" to begin.', 'info');
+        });
+        
+        // Clean up
+        window.addEventListener('beforeunload', function() {
+            if (video.srcObject) {
+                const tracks = video.srcObject.getTracks();
+                tracks.forEach(track => track.stop());
+            }
+        });
+    </script>
+</body>
+</html>
